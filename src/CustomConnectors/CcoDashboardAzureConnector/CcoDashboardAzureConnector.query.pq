@@ -1,6 +1,7 @@
 ﻿// Use this file to write queries to test your data connector
 let
-    result = CcoDashboardAzureConnector.Management("us-government")
+    result = CcoDashboardAzureConnector.Management(),
+    result2 = result{0}[Data]
 in
     result
 

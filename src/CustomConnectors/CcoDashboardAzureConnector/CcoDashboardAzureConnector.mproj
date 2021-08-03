@@ -10,15 +10,16 @@
     <AllowNativeQuery>False</AllowNativeQuery>
     <AsAction>False</AsAction>
     <FastCombine>False</FastCombine>
-    <ClearLog>False</ClearLog>
+    <ClearLog>True</ClearLog>
     <ShowEngineTraces>False</ShowEngineTraces>
-    <ShowUserTraces>False</ShowUserTraces>
+    <ShowUserTraces>True</ShowUserTraces>
     <LegacyRedirects>False</LegacyRedirects>
     <SuppressRowErrors>False</SuppressRowErrors>
     <SuppressCellErrors>False</SuppressCellErrors>
     <MaxRows>1000</MaxRows>
     <ExtensionProject>Yes</ExtensionProject>
     <Name>CcoDashboardAzureConnector</Name>
+    <ThrowOnFoldingFailure>False</ThrowOnFoldingFailure>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>false</DebugSymbols>
@@ -49,6 +50,9 @@
       <SubType>Content</SubType>
     </Compile>
     <Compile Include="client_id_govus">
+      <SubType>Content</SubType>
+    </Compile>
+    <Compile Include="Diagnostics.pqm">
       <SubType>Content</SubType>
     </Compile>
   </ItemGroup>
