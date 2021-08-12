@@ -1,6 +1,9 @@
 ﻿// This file contains your Data Connector logic
 section CcoDashboardAzureConnector;
 
+//client id: 7c7cf605-fd47-4391-8339-8649cd2a8ac3
+//secret: lvGB2D5W_3FG.vZa6MUZFs_B-DIA148V.1
+
 // Oauth info from azure portal
 client_id_global = Text.FromBinary(Extension.Contents("client_id_global"));
 redirect_uri_global = "https://de-users-preview.sqlazurelabs.com/account/reply/";
@@ -47,20 +50,21 @@ shared ManagementImpl = () =>
        
        
          gov = "global",
-        _gov = Diagnostics.Trace(TraceLevel.Information, "Gov", gov),
+         token = GetAccessToken(),
         
         objects = #table(
             {"Name",       "Key",        "Data",                           "ItemKind", "ItemName", "IsLeaf"},{
-//             {"Policies",   "policies",      GetPoliciesTable(gov),  "Table",    "Table",    true},                        
-//             {"Get entities Management Groups",   "alldescendantstrick",      GetAllDescendantsPortalWay(gov),  "Table",    "Table",    true},   
-//             {"All Resources", "allresources", GetAllResources(gov), "Table", "Table", true},
+             {"Policies",   "policies",      GetPoliciesTable(gov, token),  "Table",    "Table",    true},                        
+             {"Get entities Management Groups",   "alldescendantstrick",      GetAllDescendantsPortalWay(gov),  "Table",    "Table",    true},   
+             {"All Resources", "allresources", GetAllResources(gov), "Table", "Table", true},
+             {"Resource Groups", "resourcegroups", GetResourceGroups(gov), "Table", "Table", true},
 //             {"Blueprints", "blueprints", GetAllBlueprintsByScope(gov), "Table", "Table", true},
 //             {"Blueprint Artifacts", "blueprintartifact", GetBlueprintArtifacts(gov), "Table", "Table", true},
 //             {"Published Blueprints", "blueprintspublished", GetPublishedBlueprints(gov), "Table", "Table", true},
-             {"Policy definitions", "policydefinitions", GetPolicyDefinitions(gov), "Table", "Table", true},
-//             {"Policy definitions Compliance Mapping", "policydefinitionsmapping", GetPolicyDefinitionsMappings(gov), "Table", "Table", true},
+//             {"Policy definitions", "policydefinitions", GetPolicyDefinitions(gov), "Table", "Table", true},
+             {"Policy definitions Compliance Mapping", "policydefinitionsmapping", GetPolicyDefinitionsMappings(gov), "Table", "Table", true},
             
-            {"GetManagementUrl", "managementUrl", GetManagementBaseUri(_gov), "Function", "Function", true},
+            {"GetManagementUrl", "managementUrl", GetManagementBaseUri(gov), "Function", "Function", true},
             {"Subscriptions", "subscriptions", GetSubscriptionsTable(gov), "Table", "Table", true}
         }),
         NavTable = Table.ToNavigationTable(objects, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
@@ -84,30 +88,30 @@ GetManagementUri=(govKind as text, requestPath as text)=>
     in result;
 
 // Get all descendants using the same api than portal.azure.com
-// shared GetAllDescendantsPortalWay=(govKind as text) as table =>
-//     let
-//         token = GetAccessToken(),        
-//         headers = [ Authorization = "Bearer " & token ],
-//         tenantList = Json.Document(Web.Contents(GetManagementUri(govKind, "tenants?api-version=2019-11-01"), 
-//             [Headers=headers, 
-//             ManualCredentials=true])),
-//         value=tenantList[value],
-//         #"Converted to Table" = Table.FromList(value, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
-//         #"ExpandedColumns" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"id", "tenantId", "countryCode", "displayName", "domains", "tenantCategory"}, {"id", "tenantId", "countryCode", "displayName", "domains", "tenantCategory"}),
-//         // loop all tenants to get its management groups
-//         #"RetrieveTenantManagementGroups"= Table.AddColumn(#"ExpandedColumns", "ManagementGroups", each GetTenantManagementGroups(govKind, [tenantId], token))
-//     in
-//         #"RetrieveTenantManagementGroups";
+shared GetAllDescendantsPortalWay=(govKind as text) as table =>
+    let
+        token = GetAccessToken(),        
+        headers = [ Authorization = "Bearer " & token ],
+        tenantList = Json.Document(Web.Contents(GetManagementUri(govKind, "tenants?api-version=2019-11-01"), 
+            [Headers=headers, 
+            ManualCredentials=true])),
+        value=tenantList[value],
+        #"Converted to Table" = Table.FromList(value, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+        #"ExpandedColumns" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"id", "tenantId", "countryCode", "displayName", "domains", "tenantCategory"}, {"id", "tenantId", "countryCode", "displayName", "domains", "tenantCategory"}),
+        // loop all tenants to get its management groups
+        #"RetrieveTenantManagementGroups"= Table.AddColumn(#"ExpandedColumns", "ManagementGroups", each GetTenantManagementGroups(govKind, [tenantId], token))
+    in
+        #"RetrieveTenantManagementGroups";
 // Retrieve the management groups in a tenant. it uses the same api than azure portal
-// GetTenantManagementGroups=(govKind, tenanId, token)=>
-//     let
-//         headers = [Authorization="Bearer " & token],
-//         Source = try Json.Document(Web.Contents(GetManagementUri(govKind, "providers/Microsoft.Management/getEntities?api-version=2018-03-01-preview&%24filter=name%20eq%20%27" & tenanId & "%27"), 
-//             [ Headers = headers, 
-//               ManualStatusHandling={403},
-//               ManualCredentials = true, 
-//               Content=Text.ToBinary("")])) otherwise "Error retrieving data"
-//     in Source;
+GetTenantManagementGroups=(govKind, tenanId, token)=>
+    let
+        headers = [Authorization="Bearer " & token],
+        Source = try Json.Document(Web.Contents(GetManagementUri(govKind, "providers/Microsoft.Management/getEntities?api-version=2018-03-01-preview&%24filter=name%20eq%20%27" & tenanId & "%27"), 
+            [ Headers = headers, 
+              ManualStatusHandling={403},
+              ManualCredentials = true, 
+              Content=Text.ToBinary("")])) otherwise "Error retrieving data"
+    in Source;
 
 // Get policy definitions
 shared GetPolicyDefinitions = (govKind as text) as table =>
@@ -123,26 +127,26 @@ shared GetPolicyDefinitions = (govKind as text) as table =>
         #"PoliciesNoErrorColumn";
 
 
-// shared GetPolicyDefinitionsMappings = (govKind as text) as table =>
-//     let
-//         token = GetAccessToken(),        
-//         #"ExpandIdColumns" = GetSubscriptionsTable(govKind, token),
-//         // loop the subscription list to retrieve data
-//         #"Policies" = Table.AddColumn(#"ExpandIdColumns", "Policies", each try SubscriptionPolicyDefinitionsMappings(govKind, [subscriptionId], token)),
-//         #"ExpandedPolicies" = Table.ExpandRecordColumn(#"Policies", "Policies", {"HasError", "Value", "Error"}, {"HasError", "Value", "Error"}),
-//         #"PoliciesOk" = Table.SelectRows(#"ExpandedPolicies", each ([HasError] = false)),
-//         #"PoliciesNoErrorColumn" = Table.RemoveColumns(#"PoliciesOk",{"HasError", "Error"}),
-//         #"Expanded Value" = Table.ExpandTableColumn(#"PoliciesNoErrorColumn", "Value", {"Column1"}, {"Column1"}),
-//         #"Expanded Column1" = Table.ExpandListColumn(#"Expanded Value", "Column1"),
-//         #"Expanded Column2" = Table.ExpandRecordColumn(#"Expanded Column1", "Column1", {"properties", "id", "type", "name"}, {"properties", "id", "type", "name"}),
-//         #"Expanded properties" = Table.ExpandRecordColumn(#"Expanded Column2", "properties", {"displayName", "policyType", "mode", "description", "metadata", "policyRule", "parameters"}, {"displayName.1", "policyType", "mode", "description", "metadata", "policyRule", "parameters"}),
-//         // #"Filtered Rows" = Table.SelectRows(#"Expanded properties", each ([policyType] = "Custom")),
-//         #"Expanded metadata" = Table.ExpandRecordColumn(#"Expanded properties", "metadata", {"category", "createdBy", "customCompliance", "customComplianceCacRef", "customComplianceRef", "securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "originalDefinitionId"}, {"category", "createdBy", "customCompliance", "customComplianceCacRef", "customComplianceRef", "securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "originalDefinitionId"}),
-//         #"Split Column by Delimiter" = Table.ExpandListColumn(Table.TransformColumns(#"Expanded metadata", {{"customComplianceRef", Splitter.SplitTextByDelimiter(",", QuoteStyle.Csv), let itemType = (type nullable text) meta [Serialized.Text = true] in type {itemType}}}), "customComplianceRef"),
-//         #"Changed Type" = Table.TransformColumnTypes(#"Split Column by Delimiter",{{"customComplianceRef", type text}})
-//         // #"Removed Columns" = Table.RemoveColumns(#"Changed Type",{"securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "type", "name", "subscriptionId", "displayName", "displayName.1", "policyType", "mode", "description", "category", "createdBy", "originalDefinitionId", "policyRule", "parameters"})
-//     in
-//         #"Changed Type";
+shared GetPolicyDefinitionsMappings = (govKind as text) as table =>
+    let
+        token = GetAccessToken(),        
+        #"ExpandIdColumns" = GetSubscriptionsTable(govKind),
+        // loop the subscription list to retrieve data
+        #"Policies" = Table.AddColumn(#"ExpandIdColumns", "Policies", each try SubscriptionPolicyDefinitionsMappings(govKind, [subscriptionId])),
+        #"ExpandedPolicies" = Table.ExpandRecordColumn(#"Policies", "Policies", {"HasError", "Value", "Error"}, {"HasError", "Value", "Error"}),
+        #"PoliciesOk" = Table.SelectRows(#"ExpandedPolicies", each ([HasError] = false)),
+        #"PoliciesNoErrorColumn" = Table.RemoveColumns(#"PoliciesOk",{"HasError", "Error"}),
+        #"Expanded Value" = Table.ExpandTableColumn(#"PoliciesNoErrorColumn", "Value", {"Column1"}, {"Column1"}),
+        #"Expanded Column1" = Table.ExpandListColumn(#"Expanded Value", "Column1"),
+        #"Expanded Column2" = Table.ExpandRecordColumn(#"Expanded Column1", "Column1", {"properties", "id", "type", "name"}, {"properties", "id", "type", "name"}),
+        #"Expanded properties" = Table.ExpandRecordColumn(#"Expanded Column2", "properties", {"displayName", "policyType", "mode", "description", "metadata", "policyRule", "parameters"}, {"displayName.1", "policyType", "mode", "description", "metadata", "policyRule", "parameters"}),
+        // #"Filtered Rows" = Table.SelectRows(#"Expanded properties", each ([policyType] = "Custom")),
+        #"Expanded metadata" = Table.ExpandRecordColumn(#"Expanded properties", "metadata", {"category", "createdBy", "customCompliance", "customComplianceCacRef", "customComplianceRef", "securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "originalDefinitionId"}, {"category", "createdBy", "customCompliance", "customComplianceCacRef", "customComplianceRef", "securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "originalDefinitionId"}),
+        #"Split Column by Delimiter" = Table.ExpandListColumn(Table.TransformColumns(#"Expanded metadata", {{"customComplianceRef", Splitter.SplitTextByDelimiter(",", QuoteStyle.Csv), let itemType = (type nullable text) meta [Serialized.Text = true] in type {itemType}}}), "customComplianceRef"),
+        #"Changed Type" = Table.TransformColumnTypes(#"Split Column by Delimiter",{{"customComplianceRef", type text}})
+        // #"Removed Columns" = Table.RemoveColumns(#"Changed Type",{"securityControl", "securityRequirement", "version", "createdOn", "updatedBy", "updatedOn", "type", "name", "subscriptionId", "displayName", "displayName.1", "policyType", "mode", "description", "category", "createdBy", "originalDefinitionId", "policyRule", "parameters"})
+    in
+        #"Changed Type";
 
 
 // Get the subscriptions of each policy
@@ -152,171 +156,197 @@ SubscriptionPolicyDefinitions=(govKind as text, subscriptionId as text, token as
         definitions = ListAllGet(url)
     in definitions;
 // 
-// SubscriptionPolicyDefinitionsMappings=(govKind as text, subscriptionId as text, token as text)=>
-//     let
-//         url = GetManagementUri(govKind, "subscriptions/" & subscriptionId & "/providers/Microsoft.Authorization/policyDefinitions?api-version=2020-09-01"),
-//         definitions = ListAllGet(url)
-//     in definitions;
+SubscriptionPolicyDefinitionsMappings=(govKind as text, subscriptionId as text)=>
+    let
+        url = GetManagementUri(govKind, "subscriptions/" & subscriptionId & "/providers/Microsoft.Authorization/policyDefinitions?api-version=2020-09-01"),
+        definitions = ListAllGet(url)
+    in definitions;
 
 // Get published blueprints
-// shared GetPublishedBlueprints=(govKind as text) as table =>
-//     let
-//         blueprintsSanitized = GetAllBlueprintsSanitized(govKind),
-//         // loop subscription list to get blueprints
-//         blueprintArtifacts = Table.AddColumn(blueprintsSanitized, "Artifacts", each try GetSubscriptionPublishedBlueprints(govKind, [scopeId], [name])),
-//         #"Expanded Artifacts" = Table.ExpandRecordColumn(blueprintArtifacts, "Artifacts", {"HasError", "Error", "Value"}, {"HasError", "Error", "Value"}),
-//         #"Filtered Rows" = Table.SelectRows(#"Expanded Artifacts", each ([HasError] = false)),
-//         RemovedErrorColumns = Table.RemoveColumns(#"Filtered Rows",{"HasError", "Error"}),
-//         #"Expanded Value" = Table.ExpandTableColumn( RemovedErrorColumns, "Value", {"Name", "Value"}, {"Name.1", "Value.1"}),
-//         #"Expanded Value.1" = Table.ExpandRecordColumn(#"Expanded Value", "Value.1", {"properties", "id", "type", "name"}, {"properties.1", "id.1", "type.1", "name.2"}),
-//         publishedBlueprints = Table.ExpandRecordColumn(#"Expanded Value.1", "properties.1", {"blueprintName", "changeNotes", "parameters", "resourceGroups", "targetScope", "status", "displayName", "description"}, {"blueprintName", "changeNotes", "parameters", "resourceGroups", "targetScope", "status", "displayName.1", "description"})
-//     in publishedBlueprints;
+shared GetPublishedBlueprints=(govKind as text) as table =>
+    let
+        blueprintsSanitized = GetAllBlueprintsSanitized(govKind),
+        // loop subscription list to get blueprints
+        blueprintArtifacts = Table.AddColumn(blueprintsSanitized, "Artifacts", each try GetSubscriptionPublishedBlueprints(govKind, [scopeId], [name])),
+        #"Expanded Artifacts" = Table.ExpandRecordColumn(blueprintArtifacts, "Artifacts", {"HasError", "Error", "Value"}, {"HasError", "Error", "Value"}),
+        #"Filtered Rows" = Table.SelectRows(#"Expanded Artifacts", each ([HasError] = false)),
+        RemovedErrorColumns = Table.RemoveColumns(#"Filtered Rows",{"HasError", "Error"}),
+        #"Expanded Value" = Table.ExpandTableColumn( RemovedErrorColumns, "Value", {"Name", "Value"}, {"Name.1", "Value.1"}),
+        #"Expanded Value.1" = Table.ExpandRecordColumn(#"Expanded Value", "Value.1", {"properties", "id", "type", "name"}, {"properties.1", "id.1", "type.1", "name.2"}),
+        publishedBlueprints = Table.ExpandRecordColumn(#"Expanded Value.1", "properties.1", {"blueprintName", "changeNotes", "parameters", "resourceGroups", "targetScope", "status", "displayName", "description"}, {"blueprintName", "changeNotes", "parameters", "resourceGroups", "targetScope", "status", "displayName.1", "description"})
+    in publishedBlueprints;
 
 // get published blueprints per susbscription
-// GetSubscriptionPublishedBlueprints=(govKind as text, scopeId as text, blueprintName as text)=>
-//     let
-//         Source = Json.Document(Web.Contents(GetManagementUri(govKind, scopeId & "/providers/Microsoft.Blueprint/blueprints/" & blueprintName & "/versions?api-version=2018-11-01-preview"))),
-//         value = Source[value],
-//         #"Converted to Table" = Record.ToTable(Source),
-//         #"Expanded Value" = Table.ExpandListColumn(#"Converted to Table", "Value")
-//     in #"Expanded Value";
+GetSubscriptionPublishedBlueprints=(govKind as text, scopeId as text, blueprintName as text)=>
+    let
+        Source = Json.Document(Web.Contents(GetManagementUri(govKind, scopeId & "/providers/Microsoft.Blueprint/blueprints/" & blueprintName & "/versions?api-version=2018-11-01-preview"))),
+        value = Source[value],
+        #"Converted to Table" = Record.ToTable(Source),
+        #"Expanded Value" = Table.ExpandListColumn(#"Converted to Table", "Value")
+    in #"Expanded Value";
 
 
 // Gets the artifacts for all blueprints
-// shared GetBlueprintArtifacts=(govKind as text) as table =>
-//     let
-//         // gets all blueprints for which the user has permissions
-//         blueprintsSanitized = GetAllBlueprintsSanitized(govKind),
-//         // loops the blueprints to retrieve the artifacts
-//         blueprintArtifacts = Table.AddColumn(blueprintsSanitized, "Artifacts", each try GetArtifactsByBlueprint(govKind, [scopeId], [name])),
-//         // filter errors rows
-//         #"Expanded Artifacts" = Table.ExpandRecordColumn(blueprintArtifacts, "Artifacts", {"HasError", "Error", "Value"}, {"HasError", "Error", "Value"}),
-//         #"Filtered Rows" = Table.SelectRows(#"Expanded Artifacts", each ([HasError] = false)),
-//         #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows",{"HasError", "Error"}),
-//         #"Expanded Value" = Table.ExpandRecordColumn(#"Removed Columns", "Value", {"value"}, {"value.1"}),
-//         #"Expanded value.1" = Table.ExpandListColumn(#"Expanded Value", "value.1"),
-//         #"Expanded value.2" = Table.ExpandRecordColumn(#"Expanded value.1", "value.1", {"properties", "kind", "id", "type", "name"}, {"properties.1", "kind", "id.1", "type.1", "name.1"})
-//     in #"Expanded value.2";
+shared GetBlueprintArtifacts=(govKind as text) as table =>
+    let
+        // gets all blueprints for which the user has permissions
+        blueprintsSanitized = GetAllBlueprintsSanitized(govKind),
+        // loops the blueprints to retrieve the artifacts
+        blueprintArtifacts = Table.AddColumn(blueprintsSanitized, "Artifacts", each try GetArtifactsByBlueprint(govKind, [scopeId], [name])),
+        // filter errors rows
+        #"Expanded Artifacts" = Table.ExpandRecordColumn(blueprintArtifacts, "Artifacts", {"HasError", "Error", "Value"}, {"HasError", "Error", "Value"}),
+        #"Filtered Rows" = Table.SelectRows(#"Expanded Artifacts", each ([HasError] = false)),
+        #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows",{"HasError", "Error"}),
+        #"Expanded Value" = Table.ExpandRecordColumn(#"Removed Columns", "Value", {"value"}, {"value.1"}),
+        #"Expanded value.1" = Table.ExpandListColumn(#"Expanded Value", "value.1"),
+        #"Expanded value.2" = Table.ExpandRecordColumn(#"Expanded value.1", "value.1", {"properties", "kind", "id", "type", "name"}, {"properties.1", "kind", "id.1", "type.1", "name.1"})
+    in #"Expanded value.2";
 
 // gets the artifacts for a blueprint. a blueprint is identified by its subscription and the blueprint name
-// GetArtifactsByBlueprint=(govKind as text, scopeId as text, blueprintName as text)=>
-//     let
-//         url =GetManagementUri(govKind, scopeId & "/providers/Microsoft.Blueprint/blueprints/"&blueprintName&"/artifacts?api-version=2018-11-01-preview"),
-//         Source = Json.Document(Web.Contents(url))
-//     in Source;
+GetArtifactsByBlueprint=(govKind as text, scopeId as text, blueprintName as text)=>
+    let
+        url =GetManagementUri(govKind, scopeId & "/providers/Microsoft.Blueprint/blueprints/"&blueprintName&"/artifacts?api-version=2018-11-01-preview"),
+        Source = Json.Document(Web.Contents(url))
+    in Source;
 
 // get all blueprints for all subscriptions
-// shared GetAllBlueprints=(govKind as text) as table =>
-//     let
-//         token= GetAccessToken(),
-//         subscriptions = GetSubscriptionsTable(govKind, token),
-//         blueprints = Table.AddColumn(subscriptions, "Blueprints", each GetSubscriptionBlueprints(govKind, [subscriptionId], token))
-//     in 
-//         blueprints;
+shared GetAllBlueprints=(govKind as text) as table =>
+    let
+        token= GetAccessToken(),
+        subscriptions = GetSubscriptionsTable(govKind, token),
+        blueprints = Table.AddColumn(subscriptions, "Blueprints", each GetSubscriptionBlueprints(govKind, [subscriptionId], token))
+    in 
+        blueprints;
 
 // get all brueprints of a given subscription
-// GetSubscriptionBlueprints= (govKind as text, subscriptionId as text, token as text) =>
-//     let
-//         url = GetManagementUri(govKind, "subscriptions/" & subscriptionId & "/providers/Microsoft.Blueprint/blueprints?api-version=2018-11-01-preview"),
-//         Source = ListAllGet(url)
-//     in
-//         Source;
+GetSubscriptionBlueprints= (govKind as text, subscriptionId as text, token as text) =>
+    let
+        url = GetManagementUri(govKind, "subscriptions/" & subscriptionId & "/providers/Microsoft.Blueprint/blueprints?api-version=2018-11-01-preview"),
+        Source = ListAllGet(url)
+    in
+        Source;
 
 // try to get all blueprints, including the ones for which the user has no permissions
-// shared GetAllBlueprintsByScope=(govKind as text) as table =>
-//     let
-//         token= GetAccessToken(),
-//         descendants = GetAllDescendantsPortalWay(govKind),
-//         #"Expanded ManagementGroups" = Table.ExpandRecordColumn(descendants, "ManagementGroups", {"count", "value"}, {"ManagementGroups.count", "ManagementGroups.value"}),
-//         #"Expanded ManagementGroups.value" = Table.ExpandListColumn(#"Expanded ManagementGroups", "ManagementGroups.value"),
-//         #"Expanded ManagementGroups.value1" = Table.ExpandRecordColumn(#"Expanded ManagementGroups.value", "ManagementGroups.value", {"id"}, {"scopeId"}),
-//         #"Filtered Rows" = Table.SelectRows(#"Expanded ManagementGroups.value1", each ([scopeId] <> null)),
-//         #"Removed Columns2" = Table.RemoveColumns(#"Filtered Rows",{"countryCode", "Subscription Name", "domains", "tenantCategory", "ManagementGroups.count"}),
-//         blueprints = Table.AddColumn(#"Filtered Rows", "Blueprints", each GetScopeBlueprints(govKind, [scopeId], token))
-//     in 
-//         blueprints;
+shared GetAllBlueprintsByScope=(govKind as text) as table =>
+    let
+        token= GetAccessToken(),
+        descendants = GetAllDescendantsPortalWay(govKind),
+        #"Expanded ManagementGroups" = Table.ExpandRecordColumn(descendants, "ManagementGroups", {"count", "value"}, {"ManagementGroups.count", "ManagementGroups.value"}),
+        #"Expanded ManagementGroups.value" = Table.ExpandListColumn(#"Expanded ManagementGroups", "ManagementGroups.value"),
+        #"Expanded ManagementGroups.value1" = Table.ExpandRecordColumn(#"Expanded ManagementGroups.value", "ManagementGroups.value", {"id"}, {"scopeId"}),
+        #"Filtered Rows" = Table.SelectRows(#"Expanded ManagementGroups.value1", each ([scopeId] <> null)),
+        #"Removed Columns2" = Table.RemoveColumns(#"Filtered Rows",{"countryCode", "Subscription Name", "domains", "tenantCategory", "ManagementGroups.count"}),
+        blueprints = Table.AddColumn(#"Filtered Rows", "Blueprints", each GetScopeBlueprints(govKind, [scopeId], token))
+    in 
+        blueprints;
 
 // gets the blueprints for a subscription
-// GetScopeBlueprints= (govKind as text, scope as text, token as text) =>
-//     let
-//         url = GetManagementUri(govKind, scope & "/providers/Microsoft.Blueprint/blueprints?api-version=2018-11-01-preview"),
-//         Source = ListAllGet(url)
-//     in
-//         Source;
+GetScopeBlueprints= (govKind as text, scope as text, token as text) =>
+    let
+        url = GetManagementUri(govKind, scope & "/providers/Microsoft.Blueprint/blueprints?api-version=2018-11-01-preview"),
+        Source = ListAllGet(url)
+    in
+        Source;
 
 // get all blueprints filtering the rows with errors, for instance the ones not authorized
-// GetAllBlueprintsSanitized= (govKind as text) as table=>
-//     let
-//         blueprints = GetAllBlueprintsByScope(govKind),
-// 
-//         noIdBlueprints = Table.RemoveColumns(blueprints, {"id"}),
-//         noErrorBlueprints = Table.RemoveRowsWithErrors(noIdBlueprints, {"Blueprints"}),
-//         ExpandedBlueprints = Table.ExpandTableColumn(noErrorBlueprints, "Blueprints", {"Column1"}, {"Column1"}),
-//         ExpandedColumn1 = Table.ExpandListColumn(ExpandedBlueprints, "Column1"),
-//         sanitizedBluebrints = Table.ExpandRecordColumn(ExpandedColumn1, "Column1", {"properties", "id", "type", "name"}, {"properties", "id", "type", "name"}),
-//         unnecessaryColumnsRemoved = Table.RemoveColumns(sanitizedBluebrints,{"countryCode", "domains", "tenantCategory", "ManagementGroups.count"})
-//     in unnecessaryColumnsRemoved;
+GetAllBlueprintsSanitized= (govKind as text) as table=>
+    let
+        blueprints = GetAllBlueprintsByScope(govKind),
+
+        noIdBlueprints = Table.RemoveColumns(blueprints, {"id"}),
+        noErrorBlueprints = Table.RemoveRowsWithErrors(noIdBlueprints, {"Blueprints"}),
+        ExpandedBlueprints = Table.ExpandTableColumn(noErrorBlueprints, "Blueprints", {"Column1"}, {"Column1"}),
+        ExpandedColumn1 = Table.ExpandListColumn(ExpandedBlueprints, "Column1"),
+        sanitizedBluebrints = Table.ExpandRecordColumn(ExpandedColumn1, "Column1", {"properties", "id", "type", "name"}, {"properties", "id", "type", "name"}),
+        unnecessaryColumnsRemoved = Table.RemoveColumns(sanitizedBluebrints,{"countryCode", "domains", "tenantCategory", "ManagementGroups.count"})
+    in unnecessaryColumnsRemoved;
 
 // get all resources for all subscription for which the user has permissions
-// shared GetAllResources=(govKind as text) as table=>
-//     let
-//         token = GetAccessToken(),        
-//         // get all subscriptios
-//         #"ExpandIdColumns" = GetSubscriptionsTable(govKind, token),
-//         // loop the subscription to retrieve all resources
-//         #"allResources"=Table.AddColumn(#"ExpandIdColumns", "Resources", each try GetAllSubscriptionResources(govKind, [subscriptionId], token)),
-//         #"ExpandedResources" = Table.ExpandRecordColumn(#"allResources", "Resources", {"HasError", "Value"}, {"HasError", "Value"}),
-//         #"ResourcesOk" = Table.SelectRows(#"ExpandedResources", each ([HasError] = false)),
-//         #"ResourcesNoErrorColumn" = Table.RemoveColumns(#"ResourcesOk",{"HasError"}),
-//         #"ExpandedValue" = Table.ExpandTableColumn(#"ResourcesNoErrorColumn", "Value", {"Column1"}, {"ExpandedResourcesColumn"}),
-//         #"TableWithResources" = Table.ExpandListColumn(#"ExpandedValue", "ExpandedResourcesColumn")
-//      in
-//          #"TableWithResources";
+shared GetAllResources=(govKind as text) as table=>
+    let
+        token = GetAccessToken(),        
+        // get all subscriptios
+        #"ExpandIdColumns" = GetSubscriptionsTable(govKind),
+        // loop the subscription to retrieve all resources
+        #"allResources"=Table.AddColumn(#"ExpandIdColumns", "Resources", each try GetAllSubscriptionResources(govKind, [subscriptionId])),
+        #"ExpandedResources" = Table.ExpandRecordColumn(#"allResources", "Resources", {"HasError", "Value"}, {"HasError", "Value"}),
+        #"ResourcesOk" = Table.SelectRows(#"ExpandedResources", each ([HasError] = false)),
+        #"ResourcesNoErrorColumn" = Table.RemoveColumns(#"ResourcesOk",{"HasError"}),
+        #"ExpandedValue" = Table.ExpandTableColumn(#"ResourcesNoErrorColumn", "Value", {"Column1"}, {"ExpandedResourcesColumn"}),
+        #"TableWithResources" = Table.ExpandListColumn(#"ExpandedValue", "ExpandedResourcesColumn")
+     in
+         #"TableWithResources";
+
+shared GetResourceGroups=(govKind as text) as table=>
+    let     
+        // get all subscriptios
+        #"ExpandIdColumns" = GetSubscriptionsTable(govKind),
+        // loop the subscription to retrieve all resources
+        #"resourcegroups"=Table.AddColumn(#"ExpandIdColumns", "ResourceGroups", each try GetAllSubscriptionResourceGroups(govKind, [subscriptionId])),
+        #"Expanded Resources" = Table.ExpandRecordColumn(#"resourcegroups", "ResourceGroups", {"HasError", "Value"}, {"HasError", "Value"}),
+        #"Removed Errors" = Table.RemoveRowsWithErrors(#"Expanded Resources", {"Value"}),
+        #"Expanded Value" = Table.ExpandTableColumn(#"Removed Errors", "Value", {"Column1"}, {"Column1"}),
+        #"Expanded Column1" = Table.ExpandListColumn(#"Expanded Value", "Column1"),
+        #"Expanded Column2" = Table.ExpandRecordColumn(#"Expanded Column1", "Column1", {"id", "name", "type", "location", "tags", "properties", "managedBy"}, {"id", "name", "type", "location", "tags", "properties", "managedBy"}),
+        #"Added Conditional Column" = Table.AddColumn(#"Expanded Column2", "IsTagged", each if [tags] = null  then "Untagged" else if [tags] = [] then "Untagged" else "Tagged"),
+        #"Removed Columns" = Table.RemoveColumns(#"Added Conditional Column",{"tags"}),
+        #"IsTaggedNumeric" = Table.AddColumn(#"Removed Columns", "IsTaggedNumeric", each if [IsTagged] = "Tagged" then 1 else 0)
+    in
+        #"IsTaggedNumeric";
 
 // get the resources of a subscription, following pages if necessary
-GetAllSubscriptionResources=(govKind as text, subscriptionId, token)=>
+GetAllSubscriptionResources=(govKind as text, subscriptionId)=>
     let
         url = GetManagementUri(govKind, "subscriptions/"&subscriptionId&"/resources?api-version=2019-05-01"),        
         allSubscriptionResources=ListAllGet(url)
     in 
         allSubscriptionResources;
 
+GetAllSubscriptionResourceGroups=(govKind as text, subscriptionId)=>
+    let
+        url = GetManagementUri(govKind, "subscriptions/"&subscriptionId&"/resourcegroups?api-version=2019-05-01"),        
+        allSubscriptionResourceGroups=ListAllGet(url)
+    in 
+        allSubscriptionResourceGroups;
+
 // Retrieves all policies for all subscriptions where the user has permissions
-// shared GetPoliciesTable = (govKind as text) as table =>
-//     let
-//         token = GetAccessToken(),        
-//         // get all user subscriptions
-//         #"ExpandIdColumns" = GetSubscriptionsTable(govKind, token),
-//         // loop all subscriptions to retrieve their policies
-//         #"Policies" = Table.AddColumn(#"ExpandIdColumns", "Policies", each try Policies(govKind, [subscriptionId], token)),
-//         // Filter errors
-//         #"ExpandedPolicies" = Table.ExpandRecordColumn(#"Policies", "Policies", {"HasError", "Value", "Error"}, {"HasError", "Value", "Error"}),
-//         #"PoliciesOk" = Table.SelectRows(#"ExpandedPolicies", each ([HasError] = false)),
-//         #"PoliciesNoErrorColumn" = Table.RemoveColumns(#"PoliciesOk",{"HasError", "Error"})
-//    in        
-//         #"PoliciesNoErrorColumn";
+shared GetPoliciesTable = (govKind as text, token as text) as table =>
+    let
+        
+        // get all user subscriptions
+        #"ExpandIdColumns" = GetSubscriptionsTable(govKind),
+        // loop all subscriptions to retrieve their policies
+        #"Policies" = Table.AddColumn(#"ExpandIdColumns", "Policies", each try Policies(govKind, [subscriptionId], token)),
+        // Filter errors
+        #"ExpandedPolicies" = Table.ExpandRecordColumn(#"Policies", "Policies", {"HasError", "Value", "Error"}, {"HasError", "Value", "Error"}),
+        #"PoliciesOk" = Table.SelectRows(#"ExpandedPolicies", each ([HasError] = false)),
+        #"PoliciesNoErrorColumn" = Table.RemoveColumns(#"PoliciesOk",{"HasError", "Error"})
+   in        
+        #"PoliciesNoErrorColumn";
 
 // Retrieve all policies for a subscription
-// Policies = (govKind, subscriptionId, token) =>
-//     let
-//         url = GetManagementUri(govKind, "subscriptions/"&subscriptionId&"/providers/Microsoft.PolicyInsights/policyStates/default/queryResults?api-version=2019-10-01"),
-//         // retrieve all policies, following continuation pages if needed
-//         #"PoliciesTable"= ListAllPost(url, token)
-//     in        
-//         #"PoliciesTable";
+Policies = (govKind, subscriptionId, token) =>
+    let
+        url = GetManagementUri(govKind, "subscriptions/"&subscriptionId&"/providers/Microsoft.PolicyInsights/policyStates/default/queryResults?api-version=2019-10-01"),
+        // retrieve all policies, following continuation pages if needed
+        #"PoliciesTable"= ListAllPost(url, token)
+    in        
+        #"PoliciesTable";
 
 // HELPER FUNCTIONS
 
 // get subscriptios for a given user in table format
 shared GetSubscriptionsTable=(govKind as text) as table=>
     let
+        _govKind = Diagnostics.Trace(TraceLevel.Information, govKind, govKind),
         token = GetAccessToken(),
-        subscriptionsUri = GetManagementUri(govKind, "subscriptions?api-version=2019-11-01"),
-        sl =ListAllGet(subscriptionsUri, token)
-//         slExpanded = Table.ExpandListColumn(sl, "Column1"),
-//         ExpandIdColumns = Table.ExpandRecordColumn(slExpanded, "Column1", {"subscriptionId", "displayName"}, {"subscriptionId", "displayName"})
+        subscriptionsUri = GetManagementUri(_govKind, "subscriptions?api-version=2020-01-01"),
+        sl =ListAllGet(subscriptionsUri),
+        slExpanded = Table.ExpandListColumn(sl, "Column1"),
+        ExpandIdColumns = Table.ExpandRecordColumn(slExpanded, "Column1", {"subscriptionId", "displayName"}, {"subscriptionId", "displayName"})
     in
-        sl;
+        //ExpandIdColumns;
+        ExpandIdColumns;
 
 
 
@@ -325,10 +355,12 @@ shared GetSubscriptionsTable=(govKind as text) as table=>
 
 // Data Source Kind description
 CcoDashboardAzureConnector = [
+    TestConnection = (dataSourcePath) => { "CcoDashboardAzureConnector.Management" },
     Authentication = [
-        Anonymous = []
+       //Anonymous = [],
+       UsernamePassword = []
     ],
-    Label = "TripPin Part 1 - OData"
+    Label = "Azure RM"
 ];
 
 // Data Source UI publishing description
@@ -456,15 +488,15 @@ CcoDashboardAzureConnector.Publish = [
 //      in
 //          token;
 
-shared loginViaSP = (token as text) =>
+shared loginViaSP = () =>
     let
-        OAuthBaseUrl = "https://login.microsoftonline.com/8821ba75-c5ad-4d67-b897-fc1393b34e1a/oauth2/v2.0/token",
+        OAuthBaseUrl = "https://login.microsoftonline.com/58975fd3-4977-44d0-bea8-37af0baac100/oauth2/v2.0/token",
         _baseURL = Diagnostics.Trace(TraceLevel.Information, "OAuth URL", OAuthBaseUrl),
         
         Response = Web.Contents(_baseURL, [
            Content = Text.ToBinary(Uri.BuildQueryString([
-                client_id = "d9174b31-570e-4809-aeab-975e3a1c23ae",
-                client_secret = "J3_5dN07-zem~UPFdTWkwrQ.pa2TtW0ROh",
+                client_id = Extension.CurrentCredential()[Username],
+                client_secret = Extension.CurrentCredential()[Password],
                 grant_type = "client_credentials",
                 scope = "https://management.core.windows.net/.default"])),
             Headers=[#"Content-type" = "application/x-www-form-urlencoded",#"Accept" = "*/*"]]),
@@ -476,8 +508,7 @@ shared loginViaSP = (token as text) =>
 
 shared GetAccessToken = () =>
     let
-           token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Im5PbzNaRHJPRFhFSzFqS1doWHNsSFJfS1hFZyIsImtpZCI6Im5PbzNaRHJPRFhFSzFqS1doWHNsSFJfS1hFZyJ9.eyJhdWQiOiJodHRwczovL21hbmFnZW1lbnQuY29yZS53aW5kb3dzLm5ldCIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0Lzg4MjFiYTc1LWM1YWQtNGQ2Ny1iODk3LWZjMTM5M2IzNGUxYS8iLCJpYXQiOjE2MjgwMTcyNDQsIm5iZiI6MTYyODAxNzI0NCwiZXhwIjoxNjI4MDIxMTQ0LCJhaW8iOiJFMlpnWURqeDBhaGViSk54MThJOUl2dDNmaEV5QWdBPSIsImFwcGlkIjoiZDkxNzRiMzEtNTcwZS00ODA5LWFlYWItOTc1ZTNhMWMyM2FlIiwiYXBwaWRhY3IiOiIxIiwiaWRwIjoiaHR0cHM6Ly9zdHMud2luZG93cy5uZXQvODgyMWJhNzUtYzVhZC00ZDY3LWI4OTctZmMxMzkzYjM0ZTFhLyIsIm9pZCI6Ijk4Mzg3MjVmLTJkYWYtNGZkNi1iM2Q1LWUwZDZhZjk4Yzc4YyIsInJoIjoiMC5BU3dBZGJvaGlLM0ZaMDI0bF93VGs3Tk9HakZMRjlrT1Z3bElycXVYWGpvY0k2NHNBQUEuIiwic3ViIjoiOTgzODcyNWYtMmRhZi00ZmQ2LWIzZDUtZTBkNmFmOThjNzhjIiwidGlkIjoiODgyMWJhNzUtYzVhZC00ZDY3LWI4OTctZmMxMzkzYjM0ZTFhIiwidXRpIjoiaGthTDhJVGkya0N3VjFYS1VGVWNBUSIsInZlciI6IjEuMCIsInhtc190Y2R0IjoxNTMxNDIxMzMxfQ.IzBjzDYpnVCjVj47YLFbk95zTjICV6SVvOAY2nZ8Jxaplg7a3PV1pJ74mq2yG_oCZXLSFfXa0cSpEyjMDtVjQ3PTpDh3sxC3DXMxEU6N25VK0VuxF-WbtUDqm-P4HP2kwdvTtdT22h0VUwkvosbbJ7EKm2IuAbBB63hCaZHAHhPHEuOyQqBLr1lKzBIVUyfJ52bUBu2sjkd45PPsOsaxPaBGUoLXUUBRkVuDJuITmmzmvLeDPDjX3GYPBx4uDPJ3g8zs42kTXVutDU87rT3XzyymKkQkxi8udhz-RCSHo0gAXHkcrbQAo7bhu5bpzjacw9NZ9tIQmq8xynxOzbn0Zw",        
-           data = loginViaSP(token)
+           data = loginViaSP()
 //         credential = loginViaSP(),
 //         _credential = Diagnostics.Trace(TraceLevel.Information, "Credential", credential),
 //         token = _credential[access_token]
@@ -487,23 +518,25 @@ shared GetAccessToken = () =>
 
 // helper method that implements paging continuation implemented in azure management APIs with GET web method
 // when there are more result it returns nextLink, this methods invokes the management api when nextLink is informed
-ListAllGet = (url as text, token as text) =>
+ListAllGet = (url as text) =>
 let
     // child method that returns a page and is invoke while there are results by its parent method (ListAllGet)
-    FuncGetOnePage = (url, token) as record =>
+    FuncGetOnePage = (url) as record =>
     let 
+       token = GetAccessToken(),
        headers = [ Authorization = "Bearer " & token ],
        Source = try Json.Document(Web.Contents(url, 
                     [ Headers = headers, 
                       ManualCredentials = true, 
-                      ManualStatusHandling={403}])) otherwise "cannot retrieve data",
+                      ManualStatusHandling={403}])) 
+                otherwise "cannot retrieve data",
        data = try Source[value] otherwise null,
        next = try Source[nextLink] otherwise null,
        res = [Data=data, Next=next]
     in
         res,
     // loop while there are results
-    GeneratedListOfPages = List.Generate(()=>[res = FuncGetOnePage(url, token)], //initializer
+    GeneratedListOfPages = List.Generate(()=>[res = FuncGetOnePage(url)], //initializer
         each [res][Data]<>null, // continuation condition, while there is data
         each [res = FuncGetOnePage([res][Next])], // next
         each [res][Data]), // selector
